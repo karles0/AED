@@ -337,42 +337,38 @@ function animateSuffixLink(linkData, delay) {
 // FUNCIONES DE BÚSQUEDA Y CONTEO
 // ============================================
 
-// Extraer texto original del árbol
+// Extraer texto original del árbol usando los índices
 function extractOriginalText(treeData) {
-    let maxText = "";
+    let maxIndex = -1;
+    const segments = [];
 
-    function findLongestEdge(node) {
-        if (node.edgeLabel && node.edgeLabel !== "ROOT") {
-            if (node.edgeLabel.length > maxText.length) {
-                maxText = node.edgeLabel;
-            }
+    function traverse(node) {
+        if (node.indices && node.edgeLabel && node.edgeLabel !== "ROOT") {
+            const [start, end] = node.indices;
+            if (end > maxIndex) maxIndex = end;
+            segments.push({ start, end, label: node.edgeLabel });
         }
         if (node.children && node.children.length > 0) {
-            node.children.forEach(child => findLongestEdge(child));
+            node.children.forEach(child => traverse(child));
         }
     }
 
-    findLongestEdge(treeData);
+    traverse(treeData);
 
-    // Si no encontramos nada, construir desde las hojas
-    if (!maxText) {
-        function collectFromLeaves(node, accumulated = "") {
-            const currentLabel = (node.edgeLabel && node.edgeLabel !== "ROOT") ? node.edgeLabel : "";
-            const newAccumulated = accumulated + currentLabel;
+    // Reconstruir el texto usando los índices
+    if (maxIndex === -1) return "";
 
-            if (!node.children || node.children.length === 0) {
-                if (newAccumulated.length > maxText.length) {
-                    maxText = newAccumulated;
-                }
-            } else {
-                node.children.forEach(child => collectFromLeaves(child, newAccumulated));
-            }
+    const textArray = new Array(maxIndex + 1).fill('?');
+
+    // Colocar cada segmento en su posición correcta
+    segments.forEach(seg => {
+        for (let i = 0; i < seg.label.length && (seg.start + i) <= seg.end; i++) {
+            textArray[seg.start + i] = seg.label[i];
         }
-        collectFromLeaves(treeData);
-    }
+    });
 
-    // Remover el marcador de fin si existe
-    return maxText.replace(/\$+$/, '');
+    // Unir y remover el marcador $
+    return textArray.join('').replace(/\$+$/, '');
 }
 
 // Limpiar todos los resaltados
@@ -383,7 +379,7 @@ function resetHighlights() {
     document.getElementById('search-result').className = '';
 }
 
-// Buscar patrón (implementación de existePalabra)
+// Buscar patrón (implementación exacta de existePalabra del C++)
 async function searchPattern() {
     const pattern = document.getElementById('searchPattern').value;
     if (!pattern) {
@@ -393,74 +389,96 @@ async function searchPattern() {
 
     resetHighlights();
     const resultDiv = document.getElementById('search-result');
-    const delay = 600 / animationSpeed;
+    const delay = 800 / animationSpeed;
 
     resultDiv.className = 'info';
-    resultDiv.innerHTML = `🔍 Buscando patrón "${pattern}"...`;
+    resultDiv.innerHTML = `🔍 Buscando patrón "${pattern}" en "${originalText}"...`;
 
-    // Simular el algoritmo existePalabra
-    let currentNode = root;
-    let patternIndex = 0;
-    const path = [currentNode];
+    // Algoritmo existePalabra - SufffixNode* camino = raiz;
+    let camino = root;
+    let indicePatron = 0;
+    const n = pattern.length;
 
-    while (patternIndex < pattern.length) {
-        const currentChar = pattern[patternIndex];
+    // Resaltar nodo raíz
+    highlightNode(camino, 'highlighted');
+    await sleep(delay);
 
-        // Buscar hijo que empiece con currentChar
-        let foundChild = null;
-        for (const child of currentNode.children || []) {
+    // while (indicePatron < buscar.size())
+    while (indicePatron < pattern.length) {
+        const caracterActual = pattern[indicePatron];
+
+        resultDiv.innerHTML = `🔍 Buscando carácter '${caracterActual}' (índice ${indicePatron}) en "${originalText}"...`;
+
+        // Buscar hijo que empiece con caracterActual
+        // if (!camino->hijos.contains(caracterActual))
+        let encontrado = null;
+        for (const child of camino.children || []) {
             const edgeLabel = child.data.edgeLabel || "";
-            if (edgeLabel.length > 0 && edgeLabel[0] === currentChar) {
-                foundChild = child;
+            if (edgeLabel.length > 0 && edgeLabel[0] === caracterActual) {
+                encontrado = child;
                 break;
             }
         }
 
-        if (!foundChild) {
-            // No se encontró el patrón
-            highlightNode(currentNode, 'not-found');
+        if (!encontrado) {
+            // return false
+            highlightNode(camino, 'not-found');
             await sleep(delay);
             resultDiv.className = 'error';
-            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en el texto "${originalText}"`;
+            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
+                                  `No existe hijo con carácter '${caracterActual}' desde el nodo ${camino.data.name}`;
             return;
         }
 
-        // Resaltar el camino
-        await highlightPath(currentNode, foundChild, delay);
+        // camino = camino->hijos[caracterActual];
+        await highlightPath(camino, encontrado, delay);
+        camino = encontrado;
 
-        const edgeLabel = foundChild.data.edgeLabel || "";
+        const edgeLabel = camino.data.edgeLabel || "";
+        const tamanioCamino = edgeLabel.length;
 
-        // Verificar caracteres del edge
-        for (let i = 0; i < edgeLabel.length; i++) {
-            if (patternIndex >= pattern.length) {
-                break;
-            }
-
-            const charInTree = edgeLabel[i];
-            const charInPattern = pattern[patternIndex];
-
-            if (charInPattern !== charInTree) {
-                highlightNode(foundChild, 'not-found');
+        // for (int i = 0; i < tamanioCamino; i++)
+        for (let i = 0; i < tamanioCamino; i++) {
+            // if (indicePatron == n) return true
+            if (indicePatron === n) {
+                highlightNode(camino, 'found');
                 await sleep(delay);
-                resultDiv.className = 'error';
-                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en el texto "${originalText}"`;
+                resultDiv.className = 'success';
+                resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en "${originalText}"`;
                 return;
             }
-            patternIndex++;
-        }
 
-        currentNode = foundChild;
-        path.push(currentNode);
+            // char charEnArbol = palabra[camino->inicio + i];
+            const charEnArbol = edgeLabel[i];
+            // char charEnPatron = buscar[indicePatron];
+            const charEnPatron = pattern[indicePatron];
+
+            resultDiv.innerHTML = `🔍 Comparando '${charEnPatron}' con '${charEnArbol}' en edge "${edgeLabel}" (pos ${i})`;
+
+            // if (charEnPatron != charEnArbol) return false
+            if (charEnPatron !== charEnArbol) {
+                highlightNode(camino, 'not-found');
+                await sleep(delay);
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
+                                      `Esperaba '${charEnPatron}' pero encontró '${charEnArbol}' en nodo ${camino.data.name}`;
+                return;
+            }
+
+            // indicePatron++
+            indicePatron++;
+            await sleep(delay / 2);
+        }
     }
 
-    // Patrón encontrado
-    highlightNode(currentNode, 'found');
+    // return true
+    highlightNode(camino, 'found');
     await sleep(delay);
     resultDiv.className = 'success';
-    resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en el texto "${originalText}"`;
+    resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en "${originalText}"`;
 }
 
-// Contar ocurrencias (implementación de cantidadVeces)
+// Contar ocurrencias (implementación exacta de cantidadVeces del C++)
 async function countPattern() {
     const pattern = document.getElementById('countPattern').value;
     if (!pattern) {
@@ -470,70 +488,88 @@ async function countPattern() {
 
     resetHighlights();
     const resultDiv = document.getElementById('search-result');
-    const delay = 600 / animationSpeed;
+    const delay = 800 / animationSpeed;
 
     resultDiv.className = 'info';
-    resultDiv.innerHTML = `🔢 Contando ocurrencias de "${pattern}"...`;
+    resultDiv.innerHTML = `🔢 Contando ocurrencias de "${pattern}" en "${originalText}"...`;
 
-    // Simular el algoritmo cantidadVeces
-    let currentNode = root;
-    let patternIndex = 0;
+    // Algoritmo cantidadVeces - SufffixNode* camino = raiz;
+    let camino = root;
+    const n = pattern.length;
+    let i = 0;
 
-    while (patternIndex < pattern.length) {
-        const currentChar = pattern[patternIndex];
+    // Resaltar nodo raíz
+    highlightNode(camino, 'highlighted');
+    await sleep(delay);
 
-        // Buscar hijo que empiece con currentChar
-        let foundChild = null;
-        for (const child of currentNode.children || []) {
+    // while (i < n)
+    while (i < n) {
+        const charActual = pattern[i];
+
+        resultDiv.innerHTML = `🔢 Buscando carácter '${charActual}' (índice ${i}) en "${originalText}"...`;
+
+        // if (camino->hijos.find(charActual) == camino->hijos.end()) return 0
+        let encontrado = null;
+        for (const child of camino.children || []) {
             const edgeLabel = child.data.edgeLabel || "";
-            if (edgeLabel.length > 0 && edgeLabel[0] === currentChar) {
-                foundChild = child;
+            if (edgeLabel.length > 0 && edgeLabel[0] === charActual) {
+                encontrado = child;
                 break;
             }
         }
 
-        if (!foundChild) {
-            highlightNode(currentNode, 'not-found');
+        if (!encontrado) {
+            // return 0
+            highlightNode(camino, 'not-found');
             await sleep(delay);
             resultDiv.className = 'error';
-            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado. Ocurrencias: 0`;
+            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
+                                  `Ocurrencias: 0`;
             return;
         }
 
-        await highlightPath(currentNode, foundChild, delay);
+        // camino = camino->hijos[charActual];
+        await highlightPath(camino, encontrado, delay);
+        camino = encontrado;
 
-        const edgeLabel = foundChild.data.edgeLabel || "";
+        const edgeLabel = camino.data.edgeLabel || "";
+        const tamanioCamino = edgeLabel.length;
 
-        for (let i = 0; i < edgeLabel.length; i++) {
-            if (patternIndex >= pattern.length) {
-                break;
-            }
+        // for (int j = 0; j < tamanioCamino && i < n; j++)
+        for (let j = 0; j < tamanioCamino && i < n; j++) {
+            // char charEnArbol = palabra[camino->inicio + j];
+            const charEnArbol = edgeLabel[j];
+            // char charEnPatron = buscar[i];
+            const charEnPatron = pattern[i];
 
-            const charInTree = edgeLabel[i];
-            const charInPattern = pattern[patternIndex];
+            resultDiv.innerHTML = `🔢 Comparando '${charEnPatron}' con '${charEnArbol}' en edge "${edgeLabel}" (pos ${j})`;
 
-            if (charInPattern !== charInTree) {
-                highlightNode(foundChild, 'not-found');
+            // if (charEnPatron != charEnArbol) return 0
+            if (charEnPatron !== charEnArbol) {
+                highlightNode(camino, 'not-found');
                 await sleep(delay);
                 resultDiv.className = 'error';
-                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado. Ocurrencias: 0`;
+                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
+                                      `Ocurrencias: 0`;
                 return;
             }
-            patternIndex++;
-        }
 
-        currentNode = foundChild;
+            // i++
+            i++;
+            await sleep(delay / 2);
+        }
     }
 
-    // Contar hojas del subárbol
-    const leafCount = await countLeavesWithAnimation(currentNode, delay);
+    // return contarHojas(camino);
+    resultDiv.innerHTML = `✅ Patrón encontrado. Contando hojas del subárbol...`;
+    const leafCount = await countLeavesWithAnimation(camino, delay);
 
-    highlightNode(currentNode, 'found');
+    highlightNode(camino, 'found');
     await sleep(delay);
 
     resultDiv.className = 'success';
     resultDiv.innerHTML = `✅ Patrón "${pattern}" encontrado ${leafCount} vez/veces en "${originalText}"<br>` +
-                          `📊 Se encontraron ${leafCount} hoja(s) en el subárbol (cada hoja representa una ocurrencia)`;
+                          `📊 Se contaron ${leafCount} hoja(s) en el subárbol (cada hoja = 1 ocurrencia)`;
 }
 
 // Resaltar camino entre dos nodos
