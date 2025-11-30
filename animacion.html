@@ -28,6 +28,41 @@
         .speed-btn:hover { background: #0056b3; }
         .speed-btn.active { background: #28a745; }
         #animation-status { margin: 10px; font-weight: bold; color: #555; }
+
+        /* Controles de búsqueda */
+        #search-controls { margin: 20px auto; max-width: 800px; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .search-section { margin: 15px 0; }
+        .search-section label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+        .search-section input { width: 60%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        .search-btn { background: #17a2b8; color: white; border: none; padding: 8px 20px; cursor: pointer; font-size: 14px; border-radius: 5px; margin-left: 10px; }
+        .search-btn:hover { background: #138496; }
+        .reset-btn { background: #6c757d; }
+        .reset-btn:hover { background: #5a6268; }
+        #search-result { margin-top: 15px; padding: 12px; border-radius: 5px; font-weight: bold; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+
+        /* Nodos y enlaces resaltados durante búsqueda */
+        .node.highlighted circle { fill: #ffc107 !important; stroke: #ff9800; stroke-width: 4px; animation: pulse 1s infinite; }
+        .link-group.highlighted path { stroke: #ff9800 !important; stroke-width: 4px; }
+        .link-group.highlighted .edge-label { fill: #ff6f00; font-weight: bold; }
+        .node.found circle { fill: #4caf50 !important; stroke: #2e7d32; stroke-width: 4px; animation: found-pulse 0.5s; }
+        .node.not-found circle { fill: #f44336 !important; stroke: #c62828; stroke-width: 4px; }
+        .node.leaf-highlight circle { fill: #9c27b0 !important; stroke: #6a1b9a; stroke-width: 3px; animation: leaf-pulse 1s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+        @keyframes found-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.3); }
+        }
+        @keyframes leaf-pulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -53,9 +88,33 @@
 
 <div id="tree-container"></div>
 
+<div id="search-controls" style="display: none;">
+    <h4>🔍 Demostración de Búsqueda en Suffix Tree</h4>
+
+    <div class="search-section">
+        <label>Buscar Subcadena (existePalabra):</label>
+        <input type="text" id="searchPattern" placeholder="Ingresa la subcadena a buscar...">
+        <button class="search-btn" onclick="searchPattern()">Buscar</button>
+    </div>
+
+    <div class="search-section">
+        <label>Contar Ocurrencias (cantidadVeces):</label>
+        <input type="text" id="countPattern" placeholder="Ingresa el patrón a contar...">
+        <button class="search-btn" onclick="countPattern()">Contar</button>
+    </div>
+
+    <div class="search-section">
+        <button class="search-btn reset-btn" onclick="resetHighlights()">Limpiar Resaltados</button>
+    </div>
+
+    <div id="search-result"></div>
+</div>
+
 <script>
 let animationSpeed = 1; // Velocidad por defecto
 let svg, g, root, treeLayout, nodeMap;
+let originalText = ""; // Texto original del suffix tree
+let treeDataGlobal = null; // Datos del árbol
 
 function setSpeed(speed) {
     animationSpeed = speed;
@@ -75,7 +134,12 @@ function drawTree() {
         return alert("JSON inválido. Asegúrate de copiar todo desde { hasta }");
     }
 
+    // Guardar datos globales
+    treeDataGlobal = treeData;
+    originalText = extractOriginalText(treeData);
+
     d3.select("#tree-container").selectAll("*").remove();
+    document.getElementById('search-controls').style.display = 'none';
 
     // Tamaño aumentado para mejor visualización
     const width = 2400;
@@ -162,7 +226,10 @@ async function animateTree() {
         await animateSuffixLink(link, delay / 2);
     }
 
-    statusDiv.textContent = `✓ Árbol completado (${nodes.length} nodos)`;
+    statusDiv.textContent = `✓ Árbol completado (${nodes.length} nodos) - Texto: "${originalText}"`;
+
+    // Mostrar controles de búsqueda
+    document.getElementById('search-controls').style.display = 'block';
 }
 
 function animateLink(linkData, delay) {
@@ -264,6 +331,258 @@ function animateSuffixLink(linkData, delay) {
             .style("opacity", 0.6)
             .on("end", resolve);
     });
+}
+
+// ============================================
+// FUNCIONES DE BÚSQUEDA Y CONTEO
+// ============================================
+
+// Extraer texto original del árbol
+function extractOriginalText(treeData) {
+    let maxText = "";
+
+    function findLongestEdge(node) {
+        if (node.edgeLabel && node.edgeLabel !== "ROOT") {
+            if (node.edgeLabel.length > maxText.length) {
+                maxText = node.edgeLabel;
+            }
+        }
+        if (node.children && node.children.length > 0) {
+            node.children.forEach(child => findLongestEdge(child));
+        }
+    }
+
+    findLongestEdge(treeData);
+
+    // Si no encontramos nada, construir desde las hojas
+    if (!maxText) {
+        function collectFromLeaves(node, accumulated = "") {
+            const currentLabel = (node.edgeLabel && node.edgeLabel !== "ROOT") ? node.edgeLabel : "";
+            const newAccumulated = accumulated + currentLabel;
+
+            if (!node.children || node.children.length === 0) {
+                if (newAccumulated.length > maxText.length) {
+                    maxText = newAccumulated;
+                }
+            } else {
+                node.children.forEach(child => collectFromLeaves(child, newAccumulated));
+            }
+        }
+        collectFromLeaves(treeData);
+    }
+
+    // Remover el marcador de fin si existe
+    return maxText.replace(/\$+$/, '');
+}
+
+// Limpiar todos los resaltados
+function resetHighlights() {
+    g.selectAll('.node').classed('highlighted found not-found leaf-highlight', false);
+    g.selectAll('.link-group').classed('highlighted', false);
+    document.getElementById('search-result').innerHTML = '';
+    document.getElementById('search-result').className = '';
+}
+
+// Buscar patrón (implementación de existePalabra)
+async function searchPattern() {
+    const pattern = document.getElementById('searchPattern').value;
+    if (!pattern) {
+        alert('Por favor ingresa un patrón para buscar');
+        return;
+    }
+
+    resetHighlights();
+    const resultDiv = document.getElementById('search-result');
+    const delay = 600 / animationSpeed;
+
+    resultDiv.className = 'info';
+    resultDiv.innerHTML = `🔍 Buscando patrón "${pattern}"...`;
+
+    // Simular el algoritmo existePalabra
+    let currentNode = root;
+    let patternIndex = 0;
+    const path = [currentNode];
+
+    while (patternIndex < pattern.length) {
+        const currentChar = pattern[patternIndex];
+
+        // Buscar hijo que empiece con currentChar
+        let foundChild = null;
+        for (const child of currentNode.children || []) {
+            const edgeLabel = child.data.edgeLabel || "";
+            if (edgeLabel.length > 0 && edgeLabel[0] === currentChar) {
+                foundChild = child;
+                break;
+            }
+        }
+
+        if (!foundChild) {
+            // No se encontró el patrón
+            highlightNode(currentNode, 'not-found');
+            await sleep(delay);
+            resultDiv.className = 'error';
+            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en el texto "${originalText}"`;
+            return;
+        }
+
+        // Resaltar el camino
+        await highlightPath(currentNode, foundChild, delay);
+
+        const edgeLabel = foundChild.data.edgeLabel || "";
+
+        // Verificar caracteres del edge
+        for (let i = 0; i < edgeLabel.length; i++) {
+            if (patternIndex >= pattern.length) {
+                break;
+            }
+
+            const charInTree = edgeLabel[i];
+            const charInPattern = pattern[patternIndex];
+
+            if (charInPattern !== charInTree) {
+                highlightNode(foundChild, 'not-found');
+                await sleep(delay);
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en el texto "${originalText}"`;
+                return;
+            }
+            patternIndex++;
+        }
+
+        currentNode = foundChild;
+        path.push(currentNode);
+    }
+
+    // Patrón encontrado
+    highlightNode(currentNode, 'found');
+    await sleep(delay);
+    resultDiv.className = 'success';
+    resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en el texto "${originalText}"`;
+}
+
+// Contar ocurrencias (implementación de cantidadVeces)
+async function countPattern() {
+    const pattern = document.getElementById('countPattern').value;
+    if (!pattern) {
+        alert('Por favor ingresa un patrón para contar');
+        return;
+    }
+
+    resetHighlights();
+    const resultDiv = document.getElementById('search-result');
+    const delay = 600 / animationSpeed;
+
+    resultDiv.className = 'info';
+    resultDiv.innerHTML = `🔢 Contando ocurrencias de "${pattern}"...`;
+
+    // Simular el algoritmo cantidadVeces
+    let currentNode = root;
+    let patternIndex = 0;
+
+    while (patternIndex < pattern.length) {
+        const currentChar = pattern[patternIndex];
+
+        // Buscar hijo que empiece con currentChar
+        let foundChild = null;
+        for (const child of currentNode.children || []) {
+            const edgeLabel = child.data.edgeLabel || "";
+            if (edgeLabel.length > 0 && edgeLabel[0] === currentChar) {
+                foundChild = child;
+                break;
+            }
+        }
+
+        if (!foundChild) {
+            highlightNode(currentNode, 'not-found');
+            await sleep(delay);
+            resultDiv.className = 'error';
+            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado. Ocurrencias: 0`;
+            return;
+        }
+
+        await highlightPath(currentNode, foundChild, delay);
+
+        const edgeLabel = foundChild.data.edgeLabel || "";
+
+        for (let i = 0; i < edgeLabel.length; i++) {
+            if (patternIndex >= pattern.length) {
+                break;
+            }
+
+            const charInTree = edgeLabel[i];
+            const charInPattern = pattern[patternIndex];
+
+            if (charInPattern !== charInTree) {
+                highlightNode(foundChild, 'not-found');
+                await sleep(delay);
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado. Ocurrencias: 0`;
+                return;
+            }
+            patternIndex++;
+        }
+
+        currentNode = foundChild;
+    }
+
+    // Contar hojas del subárbol
+    const leafCount = await countLeavesWithAnimation(currentNode, delay);
+
+    highlightNode(currentNode, 'found');
+    await sleep(delay);
+
+    resultDiv.className = 'success';
+    resultDiv.innerHTML = `✅ Patrón "${pattern}" encontrado ${leafCount} vez/veces en "${originalText}"<br>` +
+                          `📊 Se encontraron ${leafCount} hoja(s) en el subárbol (cada hoja representa una ocurrencia)`;
+}
+
+// Resaltar camino entre dos nodos
+async function highlightPath(fromNode, toNode, delay) {
+    // Resaltar el nodo actual
+    highlightNode(fromNode, 'highlighted');
+
+    // Buscar y resaltar el enlace
+    const links = g.selectAll('.link-group');
+    links.each(function(d) {
+        if (d && d.target === toNode) {
+            d3.select(this).classed('highlighted', true);
+        }
+    });
+
+    await sleep(delay);
+
+    // Resaltar el nodo destino
+    highlightNode(toNode, 'highlighted');
+}
+
+// Resaltar un nodo
+function highlightNode(node, className) {
+    const nodes = g.selectAll('.node');
+    nodes.each(function(d) {
+        if (d === node) {
+            d3.select(this).classed(className, true);
+        }
+    });
+}
+
+// Contar hojas con animación
+async function countLeavesWithAnimation(node, delay) {
+    if (!node.children || node.children.length === 0) {
+        highlightNode(node, 'leaf-highlight');
+        await sleep(delay / 2);
+        return 1;
+    }
+
+    let total = 0;
+    for (const child of node.children) {
+        total += await countLeavesWithAnimation(child, delay);
+    }
+    return total;
+}
+
+// Función auxiliar de sleep
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 </script>
 
