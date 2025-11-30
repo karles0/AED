@@ -279,11 +279,13 @@ function animateNode(nodeData, delay) {
     return new Promise(resolve => {
         const nodeGroup = g.append("g")
             .attr("class", "node")
+            .attr("data-node-id", nodeData.data.name)
             .attr("transform", `translate(${nodeData.x},${nodeData.y})`)
             .style("opacity", 0);
 
         nodeGroup.append("circle")
             .attr("r", 0)
+            .attr("class", "node-circle")
             .style("fill", nodeData.children ? "#fff" : "#ffcc00");
 
         nodeGroup.append("text")
@@ -291,6 +293,9 @@ function animateNode(nodeData, delay) {
             .attr("text-anchor", "middle")
             .style("opacity", 0)
             .text(nodeData.data.name);
+
+        // Guardar referencia del nodo D3 con el elemento DOM
+        nodeData.domElement = nodeGroup;
 
         // Animación de aparición
         nodeGroup.transition()
@@ -373,8 +378,25 @@ function extractOriginalText(treeData) {
 
 // Limpiar todos los resaltados
 function resetHighlights() {
-    g.selectAll('.node').classed('highlighted found not-found leaf-highlight', false);
+    // Remover todas las clases de resaltado
+    g.selectAll('.node')
+        .classed('highlighted', false)
+        .classed('found', false)
+        .classed('not-found', false)
+        .classed('leaf-highlight', false);
+
     g.selectAll('.link-group').classed('highlighted', false);
+
+    // Restaurar colores originales de los círculos
+    g.selectAll('.node circle').each(function() {
+        const parent = d3.select(this.parentNode);
+        const nodeData = parent.datum();
+        d3.select(this)
+            .style('fill', nodeData && nodeData.children ? '#fff' : '#ffcc00')
+            .style('stroke', 'steelblue')
+            .style('stroke-width', '3px');
+    });
+
     document.getElementById('search-result').innerHTML = '';
     document.getElementById('search-result').className = '';
 }
@@ -389,10 +411,10 @@ async function searchPattern() {
 
     resetHighlights();
     const resultDiv = document.getElementById('search-result');
-    const delay = 800 / animationSpeed;
+    const delay = 1000 / animationSpeed;
 
     resultDiv.className = 'info';
-    resultDiv.innerHTML = `🔍 Buscando patrón "${pattern}" en "${originalText}"...`;
+    resultDiv.innerHTML = `🔍 Iniciando búsqueda de "${pattern}" en "${originalText}"...`;
 
     // Algoritmo existePalabra - SufffixNode* camino = raiz;
     let camino = root;
@@ -400,6 +422,7 @@ async function searchPattern() {
     const n = pattern.length;
 
     // Resaltar nodo raíz
+    resultDiv.innerHTML = `🔍 Comenzando desde la raíz (nodo ${camino.data.name})`;
     highlightNode(camino, 'highlighted');
     await sleep(delay);
 
@@ -407,7 +430,7 @@ async function searchPattern() {
     while (indicePatron < pattern.length) {
         const caracterActual = pattern[indicePatron];
 
-        resultDiv.innerHTML = `🔍 Buscando carácter '${caracterActual}' (índice ${indicePatron}) en "${originalText}"...`;
+        resultDiv.innerHTML = `🔍 En nodo <b>${camino.data.name}</b>: Buscando carácter '<b>${caracterActual}</b>' (índice ${indicePatron}/${n})`;
 
         // Buscar hijo que empiece con caracterActual
         // if (!camino->hijos.contains(caracterActual))
@@ -422,19 +445,23 @@ async function searchPattern() {
 
         if (!encontrado) {
             // return false
+            resultDiv.innerHTML = `🔍 En nodo <b>${camino.data.name}</b>: No hay hijo que comience con '<b>${caracterActual}</b>'`;
+            await sleep(delay);
             highlightNode(camino, 'not-found');
             await sleep(delay);
             resultDiv.className = 'error';
-            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
-                                  `No existe hijo con carácter '${caracterActual}' desde el nodo ${camino.data.name}`;
+            resultDiv.innerHTML = `❌ Patrón "<b>${pattern}</b>" NO encontrado en "${originalText}"<br>` +
+                                  `No existe edge con carácter '<b>${caracterActual}</b>' desde nodo <b>${camino.data.name}</b>`;
             return;
         }
 
         // camino = camino->hijos[caracterActual];
+        const edgeLabel = encontrado.data.edgeLabel || "";
+        resultDiv.innerHTML = `🔍 Encontrado edge "<b>${edgeLabel}</b>" → Moviéndose al nodo <b>${encontrado.data.name}</b>`;
+
         await highlightPath(camino, encontrado, delay);
         camino = encontrado;
 
-        const edgeLabel = camino.data.edgeLabel || "";
         const tamanioCamino = edgeLabel.length;
 
         // for (int i = 0; i < tamanioCamino; i++)
@@ -444,7 +471,7 @@ async function searchPattern() {
                 highlightNode(camino, 'found');
                 await sleep(delay);
                 resultDiv.className = 'success';
-                resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en "${originalText}"`;
+                resultDiv.innerHTML = `✅ Patrón "<b>${pattern}</b>" ENCONTRADO en "${originalText}"<br>Terminó en nodo <b>${camino.data.name}</b>`;
                 return;
             }
 
@@ -453,21 +480,22 @@ async function searchPattern() {
             // char charEnPatron = buscar[indicePatron];
             const charEnPatron = pattern[indicePatron];
 
-            resultDiv.innerHTML = `🔍 Comparando '${charEnPatron}' con '${charEnArbol}' en edge "${edgeLabel}" (pos ${i})`;
+            resultDiv.innerHTML = `🔍 Nodo <b>${camino.data.name}</b>: Comparando '<b>${charEnPatron}</b>' con '<b>${charEnArbol}</b>' en edge "<b>${edgeLabel}</b>" (pos ${i}/${tamanioCamino-1})`;
 
             // if (charEnPatron != charEnArbol) return false
             if (charEnPatron !== charEnArbol) {
+                await sleep(delay);
                 highlightNode(camino, 'not-found');
                 await sleep(delay);
                 resultDiv.className = 'error';
-                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
-                                      `Esperaba '${charEnPatron}' pero encontró '${charEnArbol}' en nodo ${camino.data.name}`;
+                resultDiv.innerHTML = `❌ Patrón "<b>${pattern}</b>" NO encontrado en "${originalText}"<br>` +
+                                      `Esperaba '<b>${charEnPatron}</b>' pero encontró '<b>${charEnArbol}</b>' en nodo <b>${camino.data.name}</b>`;
                 return;
             }
 
             // indicePatron++
             indicePatron++;
-            await sleep(delay / 2);
+            await sleep(delay * 0.3);
         }
     }
 
@@ -475,7 +503,7 @@ async function searchPattern() {
     highlightNode(camino, 'found');
     await sleep(delay);
     resultDiv.className = 'success';
-    resultDiv.innerHTML = `✅ Patrón "${pattern}" ENCONTRADO en "${originalText}"`;
+    resultDiv.innerHTML = `✅ Patrón "<b>${pattern}</b>" ENCONTRADO en "${originalText}"<br>Terminó en nodo <b>${camino.data.name}</b>`;
 }
 
 // Contar ocurrencias (implementación exacta de cantidadVeces del C++)
@@ -488,10 +516,10 @@ async function countPattern() {
 
     resetHighlights();
     const resultDiv = document.getElementById('search-result');
-    const delay = 800 / animationSpeed;
+    const delay = 1000 / animationSpeed;
 
     resultDiv.className = 'info';
-    resultDiv.innerHTML = `🔢 Contando ocurrencias de "${pattern}" en "${originalText}"...`;
+    resultDiv.innerHTML = `🔢 Iniciando conteo de ocurrencias de "${pattern}" en "${originalText}"...`;
 
     // Algoritmo cantidadVeces - SufffixNode* camino = raiz;
     let camino = root;
@@ -499,6 +527,7 @@ async function countPattern() {
     let i = 0;
 
     // Resaltar nodo raíz
+    resultDiv.innerHTML = `🔢 Comenzando desde la raíz (nodo ${camino.data.name})`;
     highlightNode(camino, 'highlighted');
     await sleep(delay);
 
@@ -506,7 +535,7 @@ async function countPattern() {
     while (i < n) {
         const charActual = pattern[i];
 
-        resultDiv.innerHTML = `🔢 Buscando carácter '${charActual}' (índice ${i}) en "${originalText}"...`;
+        resultDiv.innerHTML = `🔢 En nodo <b>${camino.data.name}</b>: Buscando carácter '<b>${charActual}</b>' (índice ${i}/${n})`;
 
         // if (camino->hijos.find(charActual) == camino->hijos.end()) return 0
         let encontrado = null;
@@ -520,19 +549,23 @@ async function countPattern() {
 
         if (!encontrado) {
             // return 0
+            resultDiv.innerHTML = `🔢 En nodo <b>${camino.data.name}</b>: No hay hijo que comience con '<b>${charActual}</b>'`;
+            await sleep(delay);
             highlightNode(camino, 'not-found');
             await sleep(delay);
             resultDiv.className = 'error';
-            resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
-                                  `Ocurrencias: 0`;
+            resultDiv.innerHTML = `❌ Patrón "<b>${pattern}</b>" NO encontrado en "${originalText}"<br>` +
+                                  `Ocurrencias: <b>0</b>`;
             return;
         }
 
         // camino = camino->hijos[charActual];
+        const edgeLabel = encontrado.data.edgeLabel || "";
+        resultDiv.innerHTML = `🔢 Encontrado edge "<b>${edgeLabel}</b>" → Moviéndose al nodo <b>${encontrado.data.name}</b>`;
+
         await highlightPath(camino, encontrado, delay);
         camino = encontrado;
 
-        const edgeLabel = camino.data.edgeLabel || "";
         const tamanioCamino = edgeLabel.length;
 
         // for (int j = 0; j < tamanioCamino && i < n; j++)
@@ -542,61 +575,83 @@ async function countPattern() {
             // char charEnPatron = buscar[i];
             const charEnPatron = pattern[i];
 
-            resultDiv.innerHTML = `🔢 Comparando '${charEnPatron}' con '${charEnArbol}' en edge "${edgeLabel}" (pos ${j})`;
+            resultDiv.innerHTML = `🔢 Nodo <b>${camino.data.name}</b>: Comparando '<b>${charEnPatron}</b>' con '<b>${charEnArbol}</b>' en edge "<b>${edgeLabel}</b>" (pos ${j}/${tamanioCamino-1})`;
 
             // if (charEnPatron != charEnArbol) return 0
             if (charEnPatron !== charEnArbol) {
+                await sleep(delay);
                 highlightNode(camino, 'not-found');
                 await sleep(delay);
                 resultDiv.className = 'error';
-                resultDiv.innerHTML = `❌ Patrón "${pattern}" NO encontrado en "${originalText}"<br>` +
-                                      `Ocurrencias: 0`;
+                resultDiv.innerHTML = `❌ Patrón "<b>${pattern}</b>" NO encontrado en "${originalText}"<br>` +
+                                      `Ocurrencias: <b>0</b>`;
                 return;
             }
 
             // i++
             i++;
-            await sleep(delay / 2);
+            await sleep(delay * 0.3);
         }
     }
 
     // return contarHojas(camino);
-    resultDiv.innerHTML = `✅ Patrón encontrado. Contando hojas del subárbol...`;
-    const leafCount = await countLeavesWithAnimation(camino, delay);
-
+    resultDiv.innerHTML = `✅ Patrón encontrado en nodo <b>${camino.data.name}</b>. Contando hojas del subárbol...`;
     highlightNode(camino, 'found');
     await sleep(delay);
 
+    const leafCount = await countLeavesWithAnimation(camino, delay);
+
+    await sleep(delay);
+
     resultDiv.className = 'success';
-    resultDiv.innerHTML = `✅ Patrón "${pattern}" encontrado ${leafCount} vez/veces en "${originalText}"<br>` +
-                          `📊 Se contaron ${leafCount} hoja(s) en el subárbol (cada hoja = 1 ocurrencia)`;
+    resultDiv.innerHTML = `✅ Patrón "<b>${pattern}</b>" encontrado <b>${leafCount}</b> vez/veces en "${originalText}"<br>` +
+                          `📊 Se contaron <b>${leafCount}</b> hoja(s) en el subárbol (cada hoja = 1 ocurrencia)`;
 }
 
 // Resaltar camino entre dos nodos
 async function highlightPath(fromNode, toNode, delay) {
-    // Resaltar el nodo actual
-    highlightNode(fromNode, 'highlighted');
+    // Limpiar resaltado anterior (mantener found y not-found)
+    g.selectAll('.node').filter(function(d) {
+        return d === fromNode || d === toNode;
+    }).classed('highlighted', false);
 
-    // Buscar y resaltar el enlace
-    const links = g.selectAll('.link-group');
-    links.each(function(d) {
-        if (d && d.target === toNode) {
+    // Resaltar el enlace entre los nodos
+    g.selectAll('.link-group').each(function(d) {
+        if (d && d.target === toNode && d.source === fromNode) {
             d3.select(this).classed('highlighted', true);
         }
     });
 
-    await sleep(delay);
+    await sleep(delay / 2);
 
-    // Resaltar el nodo destino
+    // Resaltar el nodo destino con animación
     highlightNode(toNode, 'highlighted');
+    await sleep(delay / 2);
 }
 
-// Resaltar un nodo
+// Resaltar un nodo específico
 function highlightNode(node, className) {
-    const nodes = g.selectAll('.node');
-    nodes.each(function(d) {
+    g.selectAll('.node').each(function(d) {
         if (d === node) {
-            d3.select(this).classed(className, true);
+            const nodeElement = d3.select(this);
+
+            // Remover clases anteriores si es una nueva clasificación
+            if (className === 'highlighted') {
+                nodeElement.classed('found', false).classed('not-found', false);
+            }
+
+            // Agregar la nueva clase
+            nodeElement.classed(className, true);
+
+            // Hacer scroll al nodo si está fuera de la vista
+            const container = document.getElementById('tree-container');
+            const nodeRect = this.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+
+            if (nodeRect.top < containerRect.top || nodeRect.bottom > containerRect.bottom ||
+                nodeRect.left < containerRect.left || nodeRect.right > containerRect.right) {
+                this.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            }
         }
     });
 }
