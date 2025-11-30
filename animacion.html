@@ -11,16 +11,23 @@
         button { background: #28a745; color: white; border: none; padding: 10px 20px; cursor: pointer; font-size: 16px; margin-top: 10px; border-radius: 5px; }
         button:hover { background: #218838; }
         #tree-container { width: 95%; height: 800px; border: 1px solid #ddd; background: white; border-radius: 8px; overflow: auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        
+
         .node circle { fill: #fff; stroke: steelblue; stroke-width: 3px; cursor: pointer; }
         .node text { font: 12px sans-serif; }
         .link { fill: none; stroke: #ccc; stroke-width: 2px; }
-        
+
         /* Estilo para los Suffix Links */
         .suffix-link { fill: none; stroke: #ff4444; stroke-width: 2px; stroke-dasharray: 5,5; opacity: 0.6; marker-end: url(#arrow); }
-        
+
         .edge-label { font-size: 11px; fill: #555; font-family: monospace; background: white; }
         .edge-rect { fill: white; opacity: 0.8; }
+
+        /* Controles de velocidad */
+        #speed-controls { margin: 15px 0; display: flex; justify-content: center; gap: 10px; align-items: center; }
+        .speed-btn { background: #007bff; color: white; border: none; padding: 8px 15px; cursor: pointer; font-size: 14px; border-radius: 5px; }
+        .speed-btn:hover { background: #0056b3; }
+        .speed-btn.active { background: #28a745; }
+        #animation-status { margin: 10px; font-weight: bold; color: #555; }
     </style>
 </head>
 <body>
@@ -30,11 +37,33 @@
     <textarea id="jsonInput" placeholder="Pega aquí el JSON generado por tu C++..."></textarea>
     <br>
     <button onclick="drawTree()">Renderizar Árbol</button>
+
+    <div id="speed-controls">
+        <span>Velocidad de animación:</span>
+        <button class="speed-btn" onclick="setSpeed(0.25)">x0.25</button>
+        <button class="speed-btn" onclick="setSpeed(0.5)">x0.5</button>
+        <button class="speed-btn active" onclick="setSpeed(1)">x1</button>
+        <button class="speed-btn" onclick="setSpeed(2)">x2</button>
+        <button class="speed-btn" onclick="setSpeed(4)">x4</button>
+        <button class="speed-btn" onclick="setSpeed(8)">x8</button>
+    </div>
+
+    <div id="animation-status"></div>
 </div>
 
 <div id="tree-container"></div>
 
 <script>
+let animationSpeed = 1; // Velocidad por defecto
+let svg, g, root, treeLayout, nodeMap;
+
+function setSpeed(speed) {
+    animationSpeed = speed;
+    // Actualizar botones activos
+    document.querySelectorAll('.speed-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+}
+
 function drawTree() {
     const input = document.getElementById('jsonInput').value;
     if(!input.trim()) return alert("Por favor pega el JSON primero");
@@ -48,18 +77,23 @@ function drawTree() {
 
     d3.select("#tree-container").selectAll("*").remove();
 
-    const width = 1200;
-    const height = 800;
-    
-    const svg = d3.select("#tree-container").append("svg")
-        .attr("width", width)
-        .attr("height", height)
-        .call(d3.zoom().on("zoom", (event) => {
-            g.attr("transform", event.transform);
-        }))
-        .append("g")
-        .attr("transform", "translate(50,50)");
+    // Tamaño aumentado para mejor visualización
+    const width = 2400;
+    const height = 1600;
 
+    svg = d3.select("#tree-container").append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    g = svg.append("g")
+        .attr("transform", "translate(100,100)");
+
+    // Habilitar zoom
+    svg.call(d3.zoom().on("zoom", (event) => {
+        g.attr("transform", event.transform);
+    }));
+
+    // Marcador para suffix links
     svg.append("defs").append("marker")
         .attr("id", "arrow")
         .attr("viewBox", "0 -5 10 10")
@@ -72,80 +106,164 @@ function drawTree() {
         .attr("d", "M0,-5L10,0L0,5")
         .attr("fill", "#ff4444");
 
-    const root = d3.hierarchy(treeData);
-    const treeLayout = d3.tree().size([width - 100, height - 200]);
+    root = d3.hierarchy(treeData);
+
+    // Espaciado aumentado para cadenas grandes
+    treeLayout = d3.tree()
+        .size([width - 200, height - 300])
+        .separation((a, b) => (a.parent == b.parent ? 1 : 1.5) * 2); // Más espacio entre nodos
+
     treeLayout(root);
 
-    const nodeMap = {};
+    nodeMap = {};
     root.descendants().forEach(d => {
         nodeMap[d.data.name] = d;
     });
 
-    const link = svg.selectAll(".link")
-        .data(root.links())
-        .enter().append("g")
-        .attr("class", "link-group");
+    // Iniciar animación
+    animateTree();
+}
 
-    link.append("path")
-        .attr("class", "link")
-        .attr("d", d3.linkVertical()
-            .x(d => d.x)
-            .y(d => d.y));
+async function animateTree() {
+    const nodes = root.descendants();
+    const links = root.links();
 
-    const labelGroup = link.append("g")
-        .attr("transform", d => {
-            const x = (d.source.x + d.target.x) / 2;
-            const y = (d.source.y + d.target.y) / 2;
-            return `translate(${x},${y})`;
-        });
-
-    labelGroup.append("rect")
-        .attr("class", "edge-rect")
-        .attr("x", -10).attr("y", -10)
-        .attr("width", 20).attr("height", 20);
-
-    labelGroup.append("text")
-        .attr("class", "edge-label")
-        .attr("dy", ".35em")
-        .attr("text-anchor", "middle")
-        .text(d => d.target.data.edgeLabel);
-
+    // Crear mapa de suffix links
     const suffixLinks = [];
-    root.descendants().forEach(d => {
+    nodes.forEach(d => {
         if (d.data.suffixLink && nodeMap[d.data.suffixLink]) {
             suffixLinks.push({source: d, target: nodeMap[d.data.suffixLink]});
         }
     });
 
-    svg.selectAll(".suffix-link")
-        .data(suffixLinks)
-        .enter().append("path")
-        .attr("class", "suffix-link")
-        .attr("d", d => {
-            const path = d3.path();
-            path.moveTo(d.source.x, d.source.y);
-            path.quadraticCurveTo(
-                (d.source.x + d.target.x) / 2 + 30,
-                (d.source.y + d.target.y) / 2,
-                d.target.x, d.target.y
-            );
-            return path.toString();
-        });
+    const delay = 500 / animationSpeed; // Delay base 500ms
+    const statusDiv = document.getElementById('animation-status');
 
-    const node = svg.selectAll(".node")
-        .data(root.descendants())
-        .enter().append("g")
-        .attr("class", "node")
-        .attr("transform", d => `translate(${d.x},${d.y})`);
+    // Animar nodos y enlaces uno por uno
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        statusDiv.textContent = `Construyendo árbol: ${i + 1}/${nodes.length} nodos`;
 
-    node.append("circle")
-        .attr("r", 10)
-        .style("fill", d => d.children ? "#fff" : "#ffcc00");
+        // Si no es la raíz, añadir el enlace primero
+        if (node.parent) {
+            const link = links.find(l => l.target === node);
+            if (link) {
+                await animateLink(link, delay);
+            }
+        }
 
-    node.append("text")
-        .attr("dy", -15)
-        .attr("text-anchor", "middle")
-        .text(d => d.data.name);
+        // Luego añadir el nodo
+        await animateNode(node, delay);
+    }
+
+    // Finalmente, añadir suffix links con animación
+    statusDiv.textContent = `Añadiendo suffix links...`;
+    for (const link of suffixLinks) {
+        await animateSuffixLink(link, delay / 2);
+    }
+
+    statusDiv.textContent = `✓ Árbol completado (${nodes.length} nodos)`;
+}
+
+function animateLink(linkData, delay) {
+    return new Promise(resolve => {
+        const linkGroup = g.append("g")
+            .attr("class", "link-group")
+            .style("opacity", 0);
+
+        linkGroup.append("path")
+            .attr("class", "link")
+            .attr("d", d3.linkVertical()
+                .x(d => d.x)
+                .y(d => d.y)(linkData));
+
+        const x = (linkData.source.x + linkData.target.x) / 2;
+        const y = (linkData.source.y + linkData.target.y) / 2;
+
+        const labelGroup = linkGroup.append("g")
+            .attr("transform", `translate(${x},${y})`);
+
+        const edgeLabel = linkData.target.data.edgeLabel || "";
+        const textWidth = edgeLabel.length * 7;
+        const textHeight = 18;
+
+        labelGroup.append("rect")
+            .attr("class", "edge-rect")
+            .attr("x", -textWidth/2 - 3)
+            .attr("y", -textHeight/2)
+            .attr("width", textWidth + 6)
+            .attr("height", textHeight);
+
+        labelGroup.append("text")
+            .attr("class", "edge-label")
+            .attr("dy", ".35em")
+            .attr("text-anchor", "middle")
+            .text(edgeLabel);
+
+        // Animación de aparición
+        linkGroup.transition()
+            .duration(delay * 0.8)
+            .style("opacity", 1)
+            .on("end", resolve);
+    });
+}
+
+function animateNode(nodeData, delay) {
+    return new Promise(resolve => {
+        const nodeGroup = g.append("g")
+            .attr("class", "node")
+            .attr("transform", `translate(${nodeData.x},${nodeData.y})`)
+            .style("opacity", 0);
+
+        nodeGroup.append("circle")
+            .attr("r", 0)
+            .style("fill", nodeData.children ? "#fff" : "#ffcc00");
+
+        nodeGroup.append("text")
+            .attr("dy", -15)
+            .attr("text-anchor", "middle")
+            .style("opacity", 0)
+            .text(nodeData.data.name);
+
+        // Animación de aparición
+        nodeGroup.transition()
+            .duration(delay)
+            .style("opacity", 1);
+
+        nodeGroup.select("circle")
+            .transition()
+            .duration(delay)
+            .attr("r", 10);
+
+        nodeGroup.select("text")
+            .transition()
+            .duration(delay)
+            .style("opacity", 1)
+            .on("end", resolve);
+    });
+}
+
+function animateSuffixLink(linkData, delay) {
+    return new Promise(resolve => {
+        const suffixLink = g.append("path")
+            .attr("class", "suffix-link")
+            .style("opacity", 0)
+            .attr("d", () => {
+                const path = d3.path();
+                path.moveTo(linkData.source.x, linkData.source.y);
+                path.quadraticCurveTo(
+                    (linkData.source.x + linkData.target.x) / 2 + 50,
+                    (linkData.source.y + linkData.target.y) / 2,
+                    linkData.target.x, linkData.target.y
+                );
+                return path.toString();
+            });
+
+        suffixLink.transition()
+            .duration(delay)
+            .style("opacity", 0.6)
+            .on("end", resolve);
+    });
 }
 </script>
 
